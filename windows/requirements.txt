@@ -1,0 +1,8 @@
+aiortc
+numpy
+sounddevice
+requests
+vosk
+edge-tts
+customtkinter
+pyinstaller
