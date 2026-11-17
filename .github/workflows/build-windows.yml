@@ -1,0 +1,44 @@
+name: Build Windows EXE
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "windows/**"
+      - ".github/workflows/build-windows.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: windows
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build EXE
+        run: >
+          pyinstaller --noconfirm --onedir --windowed --name AICallGuard
+          --collect-all customtkinter --collect-all aiortc --collect-all av
+          --collect-all aioice --collect-all pylibsrtp --collect-all vosk
+          --collect-all sounddevice --collect-all _sounddevice_data
+          --collect-all edge_tts --collect-all google_crc32c
+          --hidden-import _cffi_backend main.py
+
+      - name: Zip
+        run: Compress-Archive -Path dist/AICallGuard -DestinationPath ../AICallGuard-windows.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AICallGuard-windows
+          path: AICallGuard-windows.zip
