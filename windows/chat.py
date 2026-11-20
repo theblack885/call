@@ -110,7 +110,7 @@ class Chat:
             if not callable(fn):
                 continue
             try:
-                res = fn("messages") if attr != "get" else fn("messages")
+                res = fn("messages")
                 if isinstance(res, dict):
                     docs = res.get("documents") or res.get("items") or res.get("data") or []
                     if isinstance(docs, list):
@@ -154,8 +154,19 @@ class Chat:
             dt = parse_ts(d.get("createdAt"))
             if since_dt is None or dt is None or dt >= since_dt:
                 out.append(d)
-        out.sort(key=lambda item: parse_ts(item.get("createdAt")) or datetime.datetime.min.replace(tzinfo=UTC))
+        out.sort(
+            key=lambda item: parse_ts(item.get("createdAt"))
+            or datetime.datetime.min.replace(tzinfo=UTC)
+        )
         return out
+
+    @staticmethod
+    def _create_doc(fs, collection, payload):
+        for fn_name in ("create_call", "create", "add", "create_doc", "post"):
+            fn = getattr(fs, fn_name, None)
+            if callable(fn):
+                return fn(collection, payload)
+        raise AttributeError("'Firestore' object has no create method for documents")
 
     # ---------- polling ----------
     def _loop(self):
@@ -321,7 +332,7 @@ class Chat:
 
         def run():
             try:
-                self._mk().create_call("messages", {**self._base(peer, "text"), "text": t})
+                self._create_doc(self._mk(), "messages", {**self._base(peer, "text"), "text": t})
                 self.wake.set()
             except Exception as e:
                 self.error = str(e)
@@ -383,7 +394,7 @@ class Chat:
             for i, p in enumerate(parts):
                 fs.patch(f"blobs/{blob}_{i}", {"d": p})
                 self.uploads[blob]["percent"] = (i + 1) * 100 // len(parts)
-            fs.create_call("messages", {
+            self._create_doc(fs, "messages", {
                 **self._base(peer, kind),
                 "name": name,
                 "mime": mime,
@@ -445,4 +456,12 @@ class Chat:
                 for i in range(m["chunks"]):
                     d = fs.get(f"blobs/{m['blobId']}_{i}")
                     if not d or "d" not in d:
-                        raise RuntimeError(f"फ़ाइल का हिस्सा {i}
+                        raise RuntimeError(f"फ़ाइल का हिस्सा {i} नहीं मिला")
+                    out.write(base64.b64decode(d["d"]))
+        except Exception:
+            try:
+                f.unlink()
+            except Exception:
+                pass
+            raise
+        return fV
