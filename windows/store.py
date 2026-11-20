@@ -1,6 +1,7 @@
 import json
 import os
 import random
+import threading
 import time
 from pathlib import Path
 
@@ -12,6 +13,8 @@ MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-hi-0.22.zip"
 CFG_PATH = APP_DIR / "config.json"
 DATA_PATH = APP_DIR / "data.json"
 
+_lock = threading.RLock()
+
 DEFAULT_CFG = {
     "project_id": "",
     "api_key": "",
@@ -21,6 +24,7 @@ DEFAULT_CFG = {
     "ai_mode": True,
     "trusted": "",
     "voice": "hi-IN-SwaraNeural",
+    "sounds": True,
 }
 
 
@@ -47,35 +51,61 @@ def load_cfg():
 
 
 def save_cfg(cfg):
-    _write(CFG_PATH, cfg)
+    with _lock:
+        _write(CFG_PATH, cfg)
 
 
 def load_data():
-    d = _read(DATA_PATH, {})
+    with _lock:
+        d = _read(DATA_PATH, {})
     d.setdefault("history", [])
     d.setdefault("notes", [])
     return d
 
 
+def _save_data(d):
+    with _lock:
+        _write(DATA_PATH, d)
+
+
 def add_history(line):
-    d = load_data()
-    d["history"].insert(0, line)
-    d["history"] = d["history"][:50]
-    _write(DATA_PATH, d)
+    with _lock:
+        d = load_data()
+        d["history"].insert(0, line)
+        d["history"] = d["history"][:50]
+        _save_data(d)
 
 
 def add_note(text):
-    d = load_data()
-    d["notes"].insert(0, text)
-    d["notes"] = d["notes"][:100]
-    _write(DATA_PATH, d)
+    with _lock:
+        d = load_data()
+        d["notes"].insert(0, text)
+        d["notes"] = d["notes"][:100]
+        _save_data(d)
 
 
 def delete_first_note():
-    d = load_data()
-    if d["notes"]:
-        d["notes"].pop(0)
-        _write(DATA_PATH, d)
+    with _lock:
+        d = load_data()
+        if d["notes"]:
+            d["notes"].pop(0)
+            _save_data(d)
+
+
+def set_read(peer, ts):
+    with _lock:
+        d = load_data()
+        d.setdefault("read", {})[peer] = ts
+        _save_data(d)
+
+
+def add_peer(peer):
+    with _lock:
+        d = load_data()
+        peers = d.setdefault("peers", [])
+        if peer not in peers:
+            peers.append(peer)
+            _save_data(d)
 
 
 def model_ready():
