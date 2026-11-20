@@ -193,28 +193,28 @@ class ChatWindow(ctk.CTkToplevel):
     def __init__(self, app, peer):
         super().__init__(app)
         self.app = app
-        self.peer = peer
+        self.peer = str(peer).strip()
         self.chat = app.chat
-        self.me = app.cfg["my_id"]
+        self.me = str(app.cfg.get("my_id", "")).strip()
         self.imgs = {}
         self.sig = None
         self.status = ""
         self.status_until = 0.0
 
-        self.title(f"चैट • {peer}")
+        self.title(f"चैट • {self.peer}")
         self.geometry("480x720")
         self.configure(fg_color="#0B1020")
 
         head = ctk.CTkFrame(self, fg_color=CARD, corner_radius=0)
         head.pack(fill="x")
-        self.avatar = ctk.CTkLabel(head, text=peer[:1], width=42, height=42, corner_radius=21,
+        self.avatar = ctk.CTkLabel(head, text=(self.peer[:1] or "?"), width=42, height=42, corner_radius=21,
                                    fg_color=ACCENT, text_color=BG, font=font(18, True))
         self.avatar.pack(side="left", padx=12, pady=10)
         col = ctk.CTkFrame(head, fg_color="transparent")
         col.pack(side="left")
-        self.title_lbl = ctk.CTkLabel(col, text=peer, font=font(16, True))
+        self.title_lbl = ctk.CTkLabel(col, text=self.peer, font=font(16, True))
         self.title_lbl.pack(anchor="w")
-        ctk.CTkLabel(col, text=f"ID: {peer}", text_color="#7C8499", font=font(11)).pack(anchor="w")
+        ctk.CTkLabel(col, text=f"ID: {self.peer}", text_color="#7C8499", font=font(11)).pack(anchor="w")
         ctk.CTkButton(head, text="📞", width=44, height=36, fg_color=GREEN, hover_color="#17a34a",
                       command=self.call).pack(side="right", padx=12)
 
@@ -235,17 +235,31 @@ class ChatWindow(ctk.CTkToplevel):
         ctk.CTkButton(bar, text="➤", width=44, height=40, fg_color=ACCENT, text_color=BG,
                       command=self.send).pack(side="left")
 
-        self.chat.active_peer = peer
-        self.chat.mark_read(peer)
+        self.chat.active_peer = self.peer
+        try:
+            self.chat.mark_read(self.peer)
+        except Exception:
+            pass
         self.protocol("WM_DELETE_WINDOW", self.close)
-        self.after(150, self.lift)
+        self.after(150, self._safe_lift)
         self.after(300, self.refresh)
 
+    def _safe_lift(self):
+        try:
+            if self.winfo_exists():
+                self.lift()
+                self.focus_force()
+        except Exception:
+            pass
+
     def close(self):
-        if self.chat.active_peer == self.peer:
+        if getattr(self.chat, "active_peer", "") == self.peer:
             self.chat.active_peer = ""
         self.app.chat_wins.pop(self.peer, None)
-        self.destroy()
+        try:
+            self.destroy()
+        except Exception:
+            pass
 
     def call(self):
         sounds.play("tap")
@@ -360,8 +374,12 @@ class ChatWindow(ctk.CTkToplevel):
                 txt = ""
             self.up_lbl.configure(text=txt)
             self.chat.mark_read(self.peer)
-        except Exception:
-            pass
+        except Exception as e:
+            try:
+                if self.winfo_exists():
+                    self.up_lbl.configure(text=f"⚠️ {e}"[:90])
+            except Exception:
+                pass
         self.after(700, self.refresh)
 
 
@@ -463,6 +481,7 @@ class App(ctk.CTk):
         row.pack(fill="x", padx=10, pady=6)
         self.new_id = ctk.CTkEntry(row, placeholder_text="नई चैट: सामने वाले का ID")
         self.new_id.pack(side="left", fill="x", expand=True)
+        self.new_id.bind("<Return>", lambda e: self.open_new_chat())
         ctk.CTkButton(row, text="चैट", width=70, fg_color=ACCENT, text_color=BG,
                       command=self.open_new_chat).pack(side="left", padx=(6, 0))
         self.chat_note = ctk.CTkLabel(f, text="", text_color=AMBER, wraplength=400)
@@ -533,7 +552,10 @@ class App(ctk.CTk):
         self.flash("ID कॉपी हो गया")
 
     def flash(self, msg):
-        self.status.configure(text=msg)
+        try:
+            self.status.configure(text=msg)
+        except Exception:
+            pass
         self.msg_until = time.time() + 5
 
     def toggle_listen(self):
@@ -563,20 +585,41 @@ class App(ctk.CTk):
         if len(p) < 4:
             self.flash("सही ID डालिए")
             return
-        if p == self.cfg["my_id"]:
+        if p == str(self.cfg.get("my_id", "")).strip():
             self.flash("अपने आप से चैट नहीं कर सकते")
             return
         self.new_id.delete(0, "end")
         self.open_chat(p)
 
     def open_chat(self, peer):
-        sounds.play("tap")
-        self.chat.add_peer(peer)
-        w = self.chat_wins.get(peer)
-        if w is not None and w.winfo_exists():
-            w.lift()
+        p = str(peer or "").strip()
+        if not p:
+            self.flash("सही ID डालिए")
             return
-        self.chat_wins[peer] = ChatWindow(self, peer)
+        try:
+            sounds.play("tap")
+        except Exception:
+            pass
+        try:
+            self.chat.add_peer(p)
+        except Exception as e:
+            self.flash(f"⚠️ {e}")
+        w = self.chat_wins.get(p)
+        if w is not None:
+            try:
+                if w.winfo_exists():
+                    w.deiconify()
+                    w.lift()
+                    w.focus_force()
+                    return
+            except Exception:
+                self.chat_wins.pop(p, None)
+        try:
+            win = ChatWindow(self, p)
+            self.chat_wins[p] = win
+            self._chat_sig = None
+        except Exception as e:
+            self.flash(f"⚠️ चैट नहीं खुली: {e}")
 
     def save_ai(self):
         c = self.cfg
@@ -681,6 +724,8 @@ class App(ctk.CTk):
     # ---------- refresh loop ----------
     def refresh(self):
         try:
+            if not self.winfo_exists():
+                return
             st = self.engine.st
             self.listen_lbl.configure(
                 text="कॉल रिसीव करना: चालू" if st.listening else "कॉल रिसीव करना: बंद",
@@ -742,8 +787,8 @@ class App(ctk.CTk):
             data = store.load_data()
             self.set_box(self.hist_box, "hist", "\n\n".join(data["history"]) or "अभी कोई कॉल नहीं।")
             self.set_box(self.notes_box, "notes", "\n\n— — —\n\n".join(data["notes"]) or "अभी कोई नोट नहीं।")
-        except Exception:
-            pass
+        except Exception as e:
+            self.flash(f"⚠️ {e}")
         self.after(300, self.refresh)
 
     def on_close(self):
@@ -751,9 +796,8 @@ class App(ctk.CTk):
             self.engine.hangup()
         except Exception:
             pass
+        try:
+            self.chat.running = False
+        except Exception:
+            pass
         self.destroy()
-        os._exit(0)
-
-
-if __name__ == "__main__":
-    App().mainloop()
