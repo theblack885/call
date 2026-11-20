@@ -1,19 +1,53 @@
+import os
+import sys
+import traceback
+from pathlib import Path
+
+_BOOT_DIR = Path(os.environ.get("APPDATA") or Path.home()) / "AICallGuard"
+_BOOT_DIR.mkdir(parents=True, exist_ok=True)
+_BOOT_LOG = _BOOT_DIR / "startup.log"
+
+
+def _b(msg):
+    try:
+        with open(_BOOT_LOG, "a", encoding="utf-8") as f:
+            f.write(f"{msg}\n")
+    except Exception:
+        pass
+
+
+_b("--- EXE started ---")
+
+
+def _ex_hook(tp, val, tb):
+    _b("CRASH:\n" + "".join(traceback.format_exception(tp, val, tb)))
+    try:
+        sys.__excepthook__(tp, val, tb)
+    except Exception:
+        pass
+
+
+sys.excepthook = _ex_hook
+
+_b("importing stdlib...")
 import base64
 import io
-import os
 import threading
 import time
 import zipfile
 from tkinter import filedialog
 
+_b("importing third-party...")
 import customtkinter as ctk
 import requests
 from PIL import Image
 
+_b("importing local modules...")
 import sounds
 import store
 from chat import Chat, fmt_size, preview
 from engine import Engine
+_b("all imports done")
 
 ACCENT = "#5CF2D6"
 VIOLET = "#8B7CFF"
@@ -386,13 +420,20 @@ class ChatWindow(ctk.CTkToplevel):
 # ====================== मुख्य ऐप ======================
 class App(ctk.CTk):
     def __init__(self):
+        _b("App.__init__ start")
         super().__init__()
+        _b("super().__init__ done")
         self.cfg = store.load_cfg()
+        _b("load_cfg done")
         sounds.enabled = bool(self.cfg.get("sounds", True))
         self.engine = Engine(self.cfg)
+        _b("Engine created")
         self.engine.configure()
+        _b("engine.configure done")
         self.chat = Chat(self.cfg)
+        _b("Chat created")
         self.chat.configure()
+        _b("chat.configure done")
         self.chat_wins = {}
         self.call_win = None
         self.model_msg = ""
@@ -420,384 +461,3 @@ class App(ctk.CTk):
         ctk.CTkLabel(left, text=self.cfg["my_id"], text_color=ACCENT, font=font(28, True)).pack(anchor="w")
         ctk.CTkButton(top, text="कॉपी", width=70, fg_color="#1F2937", command=self.copy_id).pack(side="right")
         row = ctk.CTkFrame(card, fg_color="transparent")
-        row.pack(fill="x", padx=14, pady=(6, 12))
-        self.listen_lbl = ctk.CTkLabel(row, text="कॉल रिसीव करना: बंद", text_color="#8A93A8")
-        self.listen_lbl.pack(side="left")
-        self.listen_sw = ctk.CTkSwitch(row, text="", command=self.toggle_listen, progress_color=ACCENT)
-        self.listen_sw.pack(side="right")
-
-        self.status = ctk.CTkLabel(self, text="", text_color=AMBER)
-        self.status.pack()
-
-        tabs = ctk.CTkTabview(self, fg_color=CARD, segmented_button_selected_color=ACCENT,
-                              segmented_button_selected_hover_color=ACCENT,
-                              segmented_button_unselected_color="#1F2937")
-        tabs.pack(fill="both", expand=True, padx=16, pady=(0, 16))
-        for t in ["डायल", "चैट", "AI", "हिस्ट्री", "नोट्स", "सेटअप"]:
-            tabs.add(t)
-        self.build_dial(tabs.tab("डायल"))
-        self.build_chat(tabs.tab("चैट"))
-        self.build_ai(tabs.tab("AI"))
-        self.build_history(tabs.tab("हिस्ट्री"))
-        self.build_notes(tabs.tab("नोट्स"))
-        self.build_setup(tabs.tab("सेटअप"))
-
-        self.protocol("WM_DELETE_WINDOW", self.on_close)
-        self.after(300, self.refresh)
-
-    # ---------- tabs ----------
-    def key(self, ch):
-        sounds.dtmf(ch)
-        self.num.insert("end", ch)
-
-    def back(self):
-        sounds.play("tap")
-        self.num.delete(len(self.num.get()) - 1, "end")
-
-    def build_dial(self, f):
-        self.num = ctk.CTkEntry(f, justify="center", font=font(28, True), height=56,
-                                placeholder_text="सामने वाले का ID")
-        self.num.pack(fill="x", padx=14, pady=(14, 8))
-        grid = ctk.CTkFrame(f, fg_color="transparent")
-        grid.pack()
-        for i, k in enumerate("123456789"):
-            ctk.CTkButton(grid, text=k, width=84, height=56, font=font(22), fg_color="#1F2937",
-                          command=lambda c=k: self.key(c)).grid(row=i // 3, column=i % 3, padx=5, pady=5)
-        ctk.CTkButton(grid, text="⌫", width=84, height=56, font=font(22), fg_color="#1F2937",
-                      command=self.back).grid(row=3, column=0, padx=5, pady=5)
-        ctk.CTkButton(grid, text="0", width=84, height=56, font=font(22), fg_color="#1F2937",
-                      command=lambda: self.key("0")).grid(row=3, column=1, padx=5, pady=5)
-        ctk.CTkButton(grid, text="📞", width=84, height=56, font=font(22), fg_color=GREEN,
-                      hover_color="#17a34a", command=self.do_call).grid(row=3, column=2, padx=5, pady=5)
-        ctk.CTkLabel(f, text="8 अंक का ID (इंटरनेट कॉल). Android ऐप वाले भी इसी से जुड़ते हैं.",
-                     text_color="#7C8499", wraplength=380).pack(pady=10)
-
-    def build_chat(self, f):
-        self.snd_sw = ctk.CTkSwitch(f, text="आवाज़ें (sounds)", progress_color=ACCENT, command=self.toggle_sounds)
-        self.snd_sw.pack(anchor="w", padx=10, pady=(10, 4))
-        if sounds.enabled:
-            self.snd_sw.select()
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack(fill="x", padx=10, pady=6)
-        self.new_id = ctk.CTkEntry(row, placeholder_text="नई चैट: सामने वाले का ID")
-        self.new_id.pack(side="left", fill="x", expand=True)
-        self.new_id.bind("<Return>", lambda e: self.open_new_chat())
-        ctk.CTkButton(row, text="चैट", width=70, fg_color=ACCENT, text_color=BG,
-                      command=self.open_new_chat).pack(side="left", padx=(6, 0))
-        self.chat_note = ctk.CTkLabel(f, text="", text_color=AMBER, wraplength=400)
-        self.chat_note.pack()
-        self.chat_list = ctk.CTkScrollableFrame(f, fg_color="transparent")
-        self.chat_list.pack(fill="both", expand=True, padx=4, pady=4)
-
-    def build_ai(self, f):
-        sc = ctk.CTkScrollableFrame(f, fg_color="transparent")
-        sc.pack(fill="both", expand=True)
-        self.ai_sw = ctk.CTkSwitch(sc, text="AI असिस्टेंट चालू (आने वाली कॉल AI उठाए)", progress_color=ACCENT,
-                                   command=self.save_ai)
-        self.ai_sw.pack(anchor="w", pady=6)
-        if self.cfg["ai_mode"]:
-            self.ai_sw.select()
-        self.e_name = self.entry(sc, "आपका नाम (AI यही बोलेगा, चैट में भी दिखेगा)", self.cfg["name"])
-        self.e_code = self.entry(sc, "सीक्रेट कोड (कम से कम 4 अंक)", self.cfg["code"], show="*")
-        self.e_trusted = self.entry(sc, "भरोसेमंद IDs (कॉमा से अलग, इनकी कॉल सीधी आएगी)", self.cfg["trusted"])
-        ctk.CTkButton(sc, text="सेव करो", fg_color=ACCENT, text_color=BG, command=self.save_ai).pack(pady=8, fill="x")
-
-        ctk.CTkLabel(sc, text="आवाज़ पहचान मॉडल (हिंदी, ~42 MB)", font=font(14, True)).pack(anchor="w", pady=(10, 0))
-        self.model_lbl = ctk.CTkLabel(sc, text="", text_color="#8A93A8", wraplength=380, justify="left")
-        self.model_lbl.pack(anchor="w")
-        ctk.CTkButton(sc, text="मॉडल डाउनलोड करो", fg_color=VIOLET, command=self.download_model).pack(pady=6, fill="x")
-
-        ctk.CTkLabel(sc, text="लाइव AI लॉग", font=font(14, True)).pack(anchor="w", pady=(10, 0))
-        self.log_box = ctk.CTkTextbox(sc, height=200)
-        self.log_box.pack(fill="x")
-        self.log_box.configure(state="disabled")
-
-    def build_history(self, f):
-        self.hist_box = ctk.CTkTextbox(f, height=420)
-        self.hist_box.pack(fill="both", expand=True, padx=8, pady=8)
-        self.hist_box.configure(state="disabled")
-        ctk.CTkButton(f, text="रिकॉर्डिंग्स फ़ोल्डर खोलो", fg_color="#1F2937", command=self.open_rec).pack(pady=6)
-
-    def build_notes(self, f):
-        self.note_new = ctk.CTkTextbox(f, height=90)
-        self.note_new.pack(fill="x", padx=8, pady=8)
-        row = ctk.CTkFrame(f, fg_color="transparent")
-        row.pack()
-        ctk.CTkButton(row, text="नोट सेव करो", fg_color=ACCENT, text_color=BG, command=self.save_note).pack(side="left", padx=4)
-        ctk.CTkButton(row, text="आखिरी नोट हटाओ", fg_color="#1F2937", command=self.del_note).pack(side="left", padx=4)
-        self.notes_box = ctk.CTkTextbox(f, height=300)
-        self.notes_box.pack(fill="both", expand=True, padx=8, pady=8)
-        self.notes_box.configure(state="disabled")
-
-    def build_setup(self, f):
-        ctk.CTkLabel(f, text="Firebase सेटअप (Android ऐप वाला ही प्रोजेक्ट)", font=font(14, True)).pack(anchor="w", padx=10, pady=(12, 0))
-        ctk.CTkLabel(f, text="google-services.json खोलो → \"project_id\" की value यहाँ डालो.\nAPI key खाली छोड़ सकते हो (पहले खाली ही आज़माओ).",
-                     text_color="#8A93A8", wraplength=430, justify="left").pack(anchor="w", padx=10)
-        self.e_proj = self.entry(f, "Firebase Project ID", self.cfg["project_id"])
-        self.e_key = self.entry(f, "API key (optional)", self.cfg["api_key"])
-        ctk.CTkButton(f, text="सेव करो", fg_color=ACCENT, text_color=BG, command=self.save_setup).pack(pady=10, padx=10, fill="x")
-
-    def entry(self, parent, label, value, show=None):
-        ctk.CTkLabel(parent, text=label, text_color="#8A93A8").pack(anchor="w", padx=10, pady=(8, 0))
-        e = ctk.CTkEntry(parent, show=show) if show else ctk.CTkEntry(parent)
-        e.pack(fill="x", padx=10)
-        e.insert(0, value)
-        return e
-
-    # ---------- actions ----------
-    def copy_id(self):
-        sounds.play("tap")
-        self.clipboard_clear()
-        self.clipboard_append(self.cfg["my_id"])
-        self.flash("ID कॉपी हो गया")
-
-    def flash(self, msg):
-        try:
-            self.status.configure(text=msg)
-        except Exception:
-            pass
-        self.msg_until = time.time() + 5
-
-    def toggle_listen(self):
-        on = bool(self.listen_sw.get())
-        self.engine.set_listening(on)
-        if on and not self.engine.st.listening:
-            self.listen_sw.deselect()
-
-    def toggle_sounds(self):
-        on = bool(self.snd_sw.get())
-        sounds.enabled = on
-        self.cfg["sounds"] = on
-        store.save_cfg(self.cfg)
-        if on:
-            sounds.play("receive")
-
-    def do_call(self):
-        n = self.num.get().strip()
-        if len(n) < 4:
-            self.flash("सही ID डालिए")
-            return
-        sounds.play("tap")
-        self.engine.dial(n)
-
-    def open_new_chat(self):
-        p = "".join(c for c in self.new_id.get() if c.isdigit())
-        if len(p) < 4:
-            self.flash("सही ID डालिए")
-            return
-        if p == str(self.cfg.get("my_id", "")).strip():
-            self.flash("अपने आप से चैट नहीं कर सकते")
-            return
-        self.new_id.delete(0, "end")
-        self.open_chat(p)
-
-    def open_chat(self, peer):
-        p = str(peer or "").strip()
-        if not p:
-            self.flash("सही ID डालिए")
-            return
-        try:
-            sounds.play("tap")
-        except Exception:
-            pass
-        try:
-            self.chat.add_peer(p)
-        except Exception as e:
-            self.flash(f"⚠️ {e}")
-        w = self.chat_wins.get(p)
-        if w is not None:
-            try:
-                if w.winfo_exists():
-                    w.deiconify()
-                    w.lift()
-                    w.focus_force()
-                    return
-            except Exception:
-                self.chat_wins.pop(p, None)
-        try:
-            win = ChatWindow(self, p)
-            self.chat_wins[p] = win
-            self._chat_sig = None
-        except Exception as e:
-            self.flash(f"⚠️ चैट नहीं खुली: {e}")
-
-    def save_ai(self):
-        c = self.cfg
-        c["ai_mode"] = bool(self.ai_sw.get())
-        c["name"] = self.e_name.get().strip()
-        code = "".join(ch for ch in self.e_code.get() if ch.isdigit())
-        if len(code) >= 4:
-            c["code"] = code
-        else:
-            self.flash("कोड कम से कम 4 अंक का हो")
-        c["trusted"] = self.e_trusted.get().strip()
-        store.save_cfg(c)
-        self.flash("सेव हो गया")
-
-    def save_setup(self):
-        self.cfg["project_id"] = self.e_proj.get().strip()
-        self.cfg["api_key"] = self.e_key.get().strip()
-        store.save_cfg(self.cfg)
-        self.engine.configure()
-        self.chat.configure()
-        self.flash("सेटअप सेव हुआ")
-
-    def save_note(self):
-        t = self.note_new.get("1.0", "end").strip()
-        if t:
-            store.add_note(f"{store.now_str()}\n{t}")
-            self.note_new.delete("1.0", "end")
-
-    def del_note(self):
-        store.delete_first_note()
-
-    def open_rec(self):
-        store.REC_DIR.mkdir(parents=True, exist_ok=True)
-        try:
-            os.startfile(str(store.REC_DIR))
-        except Exception:
-            pass
-
-    def download_model(self):
-        if store.model_ready():
-            self.model_msg = "✅ पहले से तैयार है"
-            return
-
-        def run():
-            try:
-                zp = store.APP_DIR / "model.zip"
-                with requests.get(store.MODEL_URL, stream=True, timeout=30) as r:
-                    total = int(r.headers.get("content-length", 0))
-                    read = 0
-                    with open(zp, "wb") as f:
-                        for chunk in r.iter_content(1 << 15):
-                            f.write(chunk)
-                            read += len(chunk)
-                            if total:
-                                self.model_msg = f"डाउनलोड हो रहा है… {read * 90 // total}%"
-                self.model_msg = "खोला जा रहा है…"
-                with zipfile.ZipFile(zp) as z:
-                    z.extractall(store.APP_DIR)
-                zp.unlink()
-                self.model_msg = "✅ तैयार है — caller बोलकर भी कोड बता सकेगा"
-            except Exception as e:
-                self.model_msg = f"⚠️ {e}"
-
-        threading.Thread(target=run, daemon=True).start()
-
-    def set_box(self, box, key, text):
-        if self._cache.get(key) != text:
-            self._cache[key] = text
-            box.configure(state="normal")
-            box.delete("1.0", "end")
-            box.insert("1.0", text)
-            box.configure(state="disabled")
-
-    def show_toast(self, ev):
-        t = ctk.CTkToplevel(self)
-        t.overrideredirect(True)
-        t.attributes("-topmost", True)
-        t.configure(fg_color="#111827")
-        w, h = 330, 84
-        sw, sh = t.winfo_screenwidth(), t.winfo_screenheight()
-        t.geometry(f"{w}x{h}+{sw - w - 20}+{sh - h - 80}")
-        ctk.CTkLabel(t, text=f"💬 {ev['title']}", font=font(14, True), text_color=ACCENT).pack(anchor="w", padx=12, pady=(8, 0))
-        ctk.CTkLabel(t, text=ev["text"][:120], wraplength=300, justify="left").pack(anchor="w", padx=12)
-
-        def go(e=None):
-            try:
-                t.destroy()
-            except Exception:
-                pass
-            self.open_chat(ev["peer"])
-
-        t.bind("<Button-1>", go)
-
-        def bye():
-            try:
-                t.destroy()
-            except Exception:
-                pass
-
-        t.after(5500, bye)
-
-    # ---------- refresh loop ----------
-    def refresh(self):
-        try:
-            if not self.winfo_exists():
-                return
-            st = self.engine.st
-            self.listen_lbl.configure(
-                text="कॉल रिसीव करना: चालू" if st.listening else "कॉल रिसीव करना: बंद",
-                text_color=ACCENT if st.listening else "#8A93A8")
-
-            # कॉल की आवाज़ें
-            if st.phase != self._prev_phase:
-                if st.phase == "active":
-                    sounds.play("call_connect")
-                elif st.phase == "idle" and self._prev_phase != "idle":
-                    sounds.play("call_end")
-                self._prev_phase = st.phase
-            if st.phase == "outgoing" and time.time() - self._last_rb > 4:
-                self._last_rb = time.time()
-                sounds.play("ringback")
-
-            if st.phase != "idle":
-                if self.call_win is None or not self.call_win.winfo_exists():
-                    self.call_win = CallWindow(self, self.engine)
-                self.call_win.update_view()
-            else:
-                if self.call_win is not None and self.call_win.winfo_exists():
-                    self.call_win.destroy()
-                    self.call_win = None
-                if st.last_msg:
-                    self.flash(st.last_msg)
-                    st.last_msg = ""
-            if time.time() > self.msg_until:
-                self.status.configure(text="")
-
-            # चैट: नए मैसेज का पॉपअप और सूची
-            for ev in self.chat.pop_events():
-                self.show_toast(ev)
-            peers = self.chat.peers()
-            sig = (self.chat.version, self.chat.read_ver, tuple(peers))
-            if sig != self._chat_sig:
-                self._chat_sig = sig
-                for w in self.chat_list.winfo_children():
-                    w.destroy()
-                if not peers:
-                    ctk.CTkLabel(self.chat_list, text="अभी कोई चैट नहीं। ऊपर ID डालकर शुरू कीजिए.",
-                                 text_color="#7C8499").pack(pady=20)
-                for p in peers:
-                    conv = self.chat.conversation(p)
-                    last = conv[-1] if conv else None
-                    name = self.chat.peer_name(p) or p
-                    un = self.chat.unread(p)
-                    line2 = (("आप: " if last["from"] == self.cfg["my_id"] else "") + preview(last)) if last else f"ID: {p}"
-                    ctk.CTkButton(
-                        self.chat_list, anchor="w", height=58, fg_color="#1F2937", hover_color="#2A3547",
-                        text=f"{name}" + (f"   🔵 {un}" if un else "") + f"\n{line2[:48]}",
-                        command=lambda pp=p: self.open_chat(pp)).pack(fill="x", pady=3)
-            self.chat_note.configure(text=("⚠️ " + self.chat.error[:110]) if self.chat.error else "")
-
-            self.model_lbl.configure(
-                text=self.model_msg or ("✅ तैयार है — caller बोलकर भी कोड बता सकेगा" if store.model_ready()
-                                        else "डाउनलोड नहीं है — बिना इसके caller को कीपैड से कोड डालना पड़ेगा"))
-            self.set_box(self.log_box, "log", "\n\n".join(st.log[:25]) or "अभी तक कोई AI कॉल नहीं हुई।")
-            data = store.load_data()
-            self.set_box(self.hist_box, "hist", "\n\n".join(data["history"]) or "अभी कोई कॉल नहीं।")
-            self.set_box(self.notes_box, "notes", "\n\n— — —\n\n".join(data["notes"]) or "अभी कोई नोट नहीं।")
-        except Exception as e:
-            self.flash(f"⚠️ {e}")
-        self.after(300, self.refresh)
-
-    def on_close(self):
-        try:
-            self.engine.hangup()
-        except Exception:
-            pass
-        try:
-            self.chat.running = False
-        except Exception:
-            pass
-        self.destroy()
