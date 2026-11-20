@@ -100,6 +100,63 @@ class Chat:
     def poll_now(self):
         self.wake.set()
 
+    # ---------- firestore helpers ----------
+    def _all_message_docs(self):
+        fs = self.fs
+        if fs is None:
+            return []
+        for attr in ("list_docs", "list_collection", "query", "get"):
+            fn = getattr(fs, attr, None)
+            if not callable(fn):
+                continue
+            try:
+                res = fn("messages") if attr != "get" else fn("messages")
+                if isinstance(res, dict):
+                    docs = res.get("documents") or res.get("items") or res.get("data") or []
+                    if isinstance(docs, list):
+                        return [d for d in docs if isinstance(d, dict)]
+                    out = []
+                    for k, v in res.items():
+                        if isinstance(v, dict):
+                            item = dict(v)
+                            item.setdefault("_id", str(k))
+                            out.append(item)
+                    if out:
+                        return out
+                elif isinstance(res, list):
+                    return [d for d in res if isinstance(d, dict)]
+            except Exception:
+                continue
+        return []
+
+    def _iter_messages_for(self, user_id, field):
+        fs = self.fs
+        if fs is None:
+            return []
+        fn = getattr(fs, "messages_for", None)
+        if callable(fn):
+            return fn(user_id, field) or []
+        return [
+            d for d in self._all_message_docs()
+            if str(d.get(field, "")) == str(user_id)
+        ]
+
+    def _iter_messages_since(self, since_str):
+        fs = self.fs
+        if fs is None:
+            return []
+        fn = getattr(fs, "messages_since", None)
+        if callable(fn):
+            return fn(since_str) or []
+        since_dt = parse_ts(since_str)
+        out = []
+        for d in self._all_message_docs():
+            dt = parse_ts(d.get("createdAt"))
+            if since_dt is None or dt is None or dt >= since_dt:
+                out.append(d)
+        out.sort(key=lambda item: parse_ts(item.get("createdAt")) or datetime.datetime.min.replace(tzinfo=UTC))
+        return out
+
     # ---------- polling ----------
     def _loop(self):
         while self.running:
@@ -119,7 +176,7 @@ class Chat:
             self.wake.clear()
 
     def _add(self, d):
-        mid = d["_id"]
+        mid = str(d.get("_id") or d.get("id") or uuid.uuid4().hex)
         with self.lock:
             if mid in self.msgs:
                 return None
@@ -146,7 +203,7 @@ class Chat:
     def _load_all(self):
         me = self.cfg["my_id"]
         for field in ("to", "from"):
-            for d in self.fs.messages_for(me, field):
+            for d in self._iter_messages_for(me, field):
                 self._add(d)
         with self.lock:
             dts = [m["dt"] for m in self.msgs.values() if m["dt"]]
@@ -160,7 +217,7 @@ class Chat:
     def _poll_once(self):
         me = self.cfg["my_id"]
         for _ in range(10):
-            docs = self.fs.messages_since(fmt_ts(self.cursor))
+            docs = self._iter_messages_since(fmt_ts(self.cursor))
             last = None
             for d in docs:
                 dt = parse_ts(d.get("createdAt"))
@@ -388,12 +445,4 @@ class Chat:
                 for i in range(m["chunks"]):
                     d = fs.get(f"blobs/{m['blobId']}_{i}")
                     if not d or "d" not in d:
-                        raise RuntimeError(f"फ़ाइल का हिस्सा {i} नहीं मिला")
-                    out.write(base64.b64decode(d["d"]))
-        except Exception:
-            try:
-                f.unlink()
-            except Exception:
-                pass
-            raise
-        return f
+                        raise RuntimeError(f"फ़ाइल का हिस्सा {i}
