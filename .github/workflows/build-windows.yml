@@ -42,7 +42,7 @@ jobs:
 
       - name: Build EXE
         run: >
-          pyinstaller --noconfirm --onefile --windowed --name AICallGuard --paths .
+          pyinstaller --noconfirm --clean --onefile --windowed --name AICallGuard --paths .
           --hidden-import fs --hidden-import store --hidden-import agent
           --hidden-import audio_io --hidden-import engine
           --hidden-import chat --hidden-import sounds
@@ -52,7 +52,16 @@ jobs:
           --collect-all edge_tts --collect-all google_crc32c --collect-all PIL
           --hidden-import _cffi_backend main.py
 
+      - name: Verify EXE exists
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/AICallGuard.exe")) {
+            Write-Error "dist/AICallGuard.exe nahi bana!"
+            exit 1
+          }
+
       - name: Publish release
+        working-directory: .
         uses: softprops/action-gh-release@v2
         with:
           tag_name: windows-${{ github.run_number }}
