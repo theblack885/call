@@ -5,4 +5,5 @@ requests
 vosk
 edge-tts
 customtkinter
+Pillow
 pyinstaller
