@@ -28,7 +28,7 @@ jobs:
         shell: pwsh
         run: |
           Get-ChildItem | Select-Object Name
-          $need = "main.py","engine.py","fs.py","store.py","agent.py","audio_io.py"
+          $need = "main.py","engine.py","fs.py","store.py","agent.py","audio_io.py","chat.py","sounds.py"
           $missing = $need | Where-Object { -not (Test-Path $_) }
           if ($missing) {
             Write-Error "Ye files windows/ folder mein nahi mili: $($missing -join ', ')"
@@ -45,10 +45,11 @@ jobs:
           pyinstaller --noconfirm --onefile --windowed --name AICallGuard --paths .
           --hidden-import fs --hidden-import store --hidden-import agent
           --hidden-import audio_io --hidden-import engine
+          --hidden-import chat --hidden-import sounds
           --collect-all customtkinter --collect-all aiortc --collect-all av
           --collect-all aioice --collect-all pylibsrtp --collect-all vosk
           --collect-all sounddevice --collect-all _sounddevice_data
-          --collect-all edge_tts --collect-all google_crc32c
+          --collect-all edge_tts --collect-all google_crc32c --collect-all PIL
           --hidden-import _cffi_backend main.py
 
       - name: Publish release
