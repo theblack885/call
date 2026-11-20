@@ -31,23 +31,44 @@ DEFAULT_CFG = {
 def _read(path, default):
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
+            return data if data is not None else default
     except Exception:
         return default
 
 
 def _write(path, obj):
-    with open(path, "w", encoding="utf-8") as f:
+    tmp_path = path.with_suffix(path.suffix + ".tmp")
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(obj, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+
+def _load_data_unlocked():
+    d = _read(DATA_PATH, {})
+    if not isinstance(d, dict):
+        d = {}
+    if not isinstance(d.get("history"), list):
+        d["history"] = []
+    if not isinstance(d.get("notes"), list):
+        d["notes"] = []
+    if not isinstance(d.get("read"), dict):
+        d["read"] = {}
+    if not isinstance(d.get("peers"), list):
+        d["peers"] = []
+    return d
 
 
 def load_cfg():
-    cfg = dict(DEFAULT_CFG)
-    cfg.update(_read(CFG_PATH, {}))
-    if not cfg["my_id"]:
-        cfg["my_id"] = str(random.randint(10000000, 99999999))
-        _write(CFG_PATH, cfg)
-    return cfg
+    with _lock:
+        cfg = dict(DEFAULT_CFG)
+        loaded = _read(CFG_PATH, {})
+        if isinstance(loaded, dict):
+            cfg.update(loaded)
+        if not str(cfg.get("my_id") or "").strip():
+            cfg["my_id"] = str(random.randint(10000000, 99999999))
+            _write(CFG_PATH, cfg)
+        return cfg
 
 
 def save_cfg(cfg):
@@ -57,10 +78,7 @@ def save_cfg(cfg):
 
 def load_data():
     with _lock:
-        d = _read(DATA_PATH, {})
-    d.setdefault("history", [])
-    d.setdefault("notes", [])
-    return d
+        return _load_data_unlocked()
 
 
 def _save_data(d):
@@ -70,7 +88,7 @@ def _save_data(d):
 
 def add_history(line):
     with _lock:
-        d = load_data()
+        d = _load_data_unlocked()
         d["history"].insert(0, line)
         d["history"] = d["history"][:50]
         _save_data(d)
@@ -78,7 +96,7 @@ def add_history(line):
 
 def add_note(text):
     with _lock:
-        d = load_data()
+        d = _load_data_unlocked()
         d["notes"].insert(0, text)
         d["notes"] = d["notes"][:100]
         _save_data(d)
@@ -86,25 +104,30 @@ def add_note(text):
 
 def delete_first_note():
     with _lock:
-        d = load_data()
+        d = _load_data_unlocked()
         if d["notes"]:
             d["notes"].pop(0)
             _save_data(d)
 
 
 def set_read(peer, ts):
+    p = str(peer or "").strip()
+    if not p:
+        return
     with _lock:
-        d = load_data()
-        d.setdefault("read", {})[peer] = ts
+        d = _load_data_unlocked()
+        d["read"][p] = ts
         _save_data(d)
 
 
 def add_peer(peer):
+    p = str(peer or "").strip()
+    if not p:
+        return
     with _lock:
-        d = load_data()
-        peers = d.setdefault("peers", [])
-        if peer not in peers:
-            peers.append(peer)
+        d = _load_data_unlocked()
+        if p not in d["peers"]:
+            d["peers"].append(p)
             _save_data(d)
 
 
